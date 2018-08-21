@@ -109,7 +109,8 @@ def build_decoder(opt, embeddings):
                                    opt.copy_attn,
                                    opt.dropout,
                                    embeddings,
-                                   opt.reuse_copy_attn)
+                                   opt.reuse_copy_attn,
+                                   opt.separate_layers)
     else:
         return StdRNNDecoder(opt.rnn_type, opt.brnn,
                              opt.dec_layers, opt.rnn_size,
@@ -119,7 +120,8 @@ def build_decoder(opt, embeddings):
                              opt.copy_attn,
                              opt.dropout,
                              embeddings,
-                             opt.reuse_copy_attn)
+                             opt.reuse_copy_attn,
+                             opt.separate_layers)
 
 
 def load_test_model(opt, dummy_opt):

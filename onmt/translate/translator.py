@@ -147,7 +147,8 @@ class Translator(object):
                   src_dir=None,
                   batch_size=None,
                   attn_debug=False,
-                  intervention=None,
+                  decoder_intervention=None,
+                  encoder_intervention=None,
                   out_file=None):
         """
         Translate content of `src_data_iter` (if not None) or `src_path`
@@ -212,12 +213,15 @@ class Translator(object):
 
         all_scores = []
         all_predictions = []
-        all_dumped_layers = []
+        all_dumped_encoder_layers = []
+        all_dumped_decoder_layers = []
 
         for batch in data_iter:
             if self.dump_layers != '':
-                batch_data, dumped_layers = self.translate_batch(batch,
-                        data, intervention=intervention)
+                batch_data, dumped_encoder_layers, dumped_decoder_layers = self.translate_batch(batch,
+                        data, decoder_intervention=decoder_intervention,
+                        encoder_intervention=encoder_intervention,
+                        dump_layers=True)
 
                 # Get the correct order of sentences so that we can dump in
                 # the same order as input occurred.
@@ -229,28 +233,36 @@ class Translator(object):
                 # we have an array of "sentences", each of which is
                 # an array of "tokens", each of which is an array of "layers",
                 # each of which is an array of "neurons".
-                dumped_layers = [unpack(layer) for layer in dumped_layers] # Tuples of (tensor, lengths)
-                dumped_layers = [
+                dumped_encoder_layers = [unpack(layer) for layer in dumped_encoder_layers] # Tuples of (tensor, lengths)
+                dumped_encoder_layers = [
                     [
                         [
                             # Array of layers
-                            dumped_layers[i][0][t][idx]
-                            for i in range(len(dumped_layers))
+                            dumped_encoder_layers[i][0][t][idx]
+                            for i in range(len(dumped_encoder_layers))
                         ]
 
-                        # Array of tokens; dumped_layers[0][1] is the list of
+                        # Array of tokens; dumped_encoder_layers[0][1] is the list of
                         # sentence lengths for the batch, so we can look up
                         # number of tokens here
-                        for t in range(dumped_layers[0][1][idx])
+                        for t in range(dumped_encoder_layers[0][1][idx])
                     ]
                     # Array of sentences
                     for idx in perm
                 ]
 
+                # Dumped decoder layers are already essentially in this format,
+                # just permuted according to batch permutation
+                dumped_decoder_layers = [
+                    dumped_decoder_layers[idx] for idx in perm
+                ]
+
                 # Accumulate all the dumped layers into one big list of sentences.
-                all_dumped_layers.extend(dumped_layers)
+                all_dumped_encoder_layers.extend(dumped_encoder_layers)
+                all_dumped_decoder_layers.extend(dumped_decoder_layers)
             else:
-                batch_data = self.translate_batch(batch, data, intervention=intervention)
+                batch_data = self.translate_batch(batch, data, encoder_intervention=encoder_intervention,
+                        decoder_intervention=decoder_intervention)
 
             translations = builder.from_batch(batch_data)
 
@@ -332,15 +344,20 @@ class Translator(object):
             json.dump(self.translator.beam_accum,
                       codecs.open(self.dump_beam, 'w', 'utf-8'))
 
+        all_dumped_layers = (
+            all_dumped_encoder_layers,
+            all_dumped_decoder_layers
+        )
+
         if self.dump_layers and self.dump_layers != -1:
             torch.save(all_dumped_layers, self.dump_layers)
 
         elif self.dump_layers == -1:
-            return all_dumped_layers, all_scores, all_predictions
+            return all_dumped_encoder_layers, all_scores, all_predictions
 
         return all_scores, all_predictions
 
-    def translate_batch(self, batch, data, intervention=None):
+    def translate_batch(self, batch, data, encoder_intervention=None, decoder_intervention=None, dump_layers=False):
         """
         Translate a batch of sentences.
 
@@ -355,9 +372,9 @@ class Translator(object):
            Shouldn't need the original dataset.
         """
         with torch.no_grad():
-            return self._translate_batch(batch, data, intervention)
+            return self._translate_batch(batch, data, encoder_intervention, decoder_intervention, dump_layers)
 
-    def _translate_batch(self, batch, data, intervention=None):
+    def _translate_batch(self, batch, data, encoder_intervention=None, decoder_intervention=None, dump_layers=False):
         # (0) Prep each of the components of the search.
         # And helper method for reducing verbosity.
         beam_size = self.beam_size
@@ -400,11 +417,12 @@ class Translator(object):
             _, src_lengths = batch.src
 
         # Collect intermediate layers if requested; push through a modification function if requested.
-        kwargs = ({'intervention': intervention} if intervention is not None else {})
-        if self.dump_layers != '':
-            enc_states, dumped_layers, memory_bank = self.model.encoder(src, src_lengths, dump_layers=True, **kwargs)
+        if dump_layers:
+            enc_states, dumped_encoder_layers, memory_bank = self.model.encoder(src, src_lengths, dump_layers=True,
+                    intervention=encoder_intervention)
         else:
-            enc_states, memory_bank = self.model.encoder(src, src_lengths, **kwargs)
+            enc_states, memory_bank = self.model.encoder(src, src_lengths,
+                    intervention=encoder_intervention)
 
         dec_states = self.model.decoder.init_decoder_state(
             src, memory_bank, enc_states)
@@ -442,9 +460,17 @@ class Translator(object):
             inp = inp.unsqueeze(2)
 
             # Run one step.
-            dec_out, dec_states, attn = self.model.decoder(
-                inp, memory_bank, dec_states, memory_lengths=memory_lengths,
-                step=i)
+            if dump_layers:
+                dec_out, dec_states, attn, dumped_decoder_layers = self.model.decoder(
+                    inp, memory_bank, dec_states, memory_lengths=memory_lengths,
+                    dump_layers=True,
+                    intervention=decoder_intervention,
+                    step=i)
+            else:
+                dec_out, dec_states, attn = self.model.decoder(
+                    inp, memory_bank, dec_states, memory_lengths=memory_lengths,
+                    intervention=decoder_intervention,
+                    step=i)
 
             dec_out = dec_out.squeeze(0)
 
@@ -471,7 +497,11 @@ class Translator(object):
             # (c) Advance each beam.
             for j, b in enumerate(beam):
                 b.advance(out[:, j],
-                          beam_attn.data[:, j, :memory_lengths[j]])
+                          beam_attn.data[:, j, :memory_lengths[j]],
+                          [
+                             layer[j * beam_size : (j + 1) * beam_size]
+                             for layer in dumped_decoder_layers
+                          ])
                 dec_states.beam_update(j, b.get_current_origin(), beam_size)
 
         # (4) Extract sentences from beam.
@@ -481,26 +511,31 @@ class Translator(object):
             ret["gold_score"] = self._run_target(batch, data)
         ret["batch"] = batch
 
-        if self.dump_layers != '':
-            return ret, dumped_layers
+        dumped_decoder_layers = ret["dumped_decoder_layers"]
+
+        if dump_layers:
+            return ret, dumped_encoder_layers, dumped_decoder_layers
         else:
             return ret
 
     def _from_beam(self, beam):
         ret = {"predictions": [],
                "scores": [],
-               "attention": []}
+               "attention": [],
+               "dumped_decoder_layers": []}
         for b in beam:
             n_best = self.n_best
             scores, ks = b.sort_finished(minimum=n_best)
-            hyps, attn = [], []
+            hyps, attn, dumps = [], [], []
             for i, (times, k) in enumerate(ks[:n_best]):
-                hyp, att = b.get_hyp(times, k)
+                hyp, att, dump = b.get_hyp(times, k)
                 hyps.append(hyp)
                 attn.append(att)
+                dumps.append(dump)
             ret["predictions"].append(hyps)
             ret["scores"].append(scores)
             ret["attention"].append(attn)
+            ret["dumped_decoder_layers"].append(dump)
         return ret
 
     def _run_target(self, batch, data):

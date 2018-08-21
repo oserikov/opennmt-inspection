@@ -60,7 +60,7 @@ class RNNDecoderBase(nn.Module):
                  hidden_size, attn_type="general",
                  coverage_attn=False, context_gate=None,
                  copy_attn=False, dropout=0.0, embeddings=None,
-                 reuse_copy_attn=False):
+                 reuse_copy_attn=False, separate_layers=False):
         super(RNNDecoderBase, self).__init__()
 
         # Basic attributes.
@@ -70,13 +70,26 @@ class RNNDecoderBase(nn.Module):
         self.hidden_size = hidden_size
         self.embeddings = embeddings
         self.dropout = nn.Dropout(dropout)
+        self.separate_layers = separate_layers
 
         # Build the RNN.
-        self.rnn = self._build_rnn(rnn_type,
-                                   input_size=self._input_size,
-                                   hidden_size=hidden_size,
-                                   num_layers=num_layers,
-                                   dropout=dropout)
+        if separate_layers:
+            layers = []
+            for n in range(num_layers):
+                layer_n = self._build_rnn(rnn_type,
+                       input_size=self._input_size if n == 0 else hidden_size,
+                       hidden_size=hidden_size,
+                       num_layers=1,
+                       dropout=dropout)
+                layers.append(layer_n)
+            self.layers = nn.ModuleList(layers)
+            self.dropout = nn.Dropout(dropout)
+        else:
+            self.rnn = self._build_rnn(rnn_type,
+                                       input_size=self._input_size,
+                                       hidden_size=hidden_size,
+                                       num_layers=num_layers,
+                                       dropout=dropout)
 
         # Set up the context gate.
         self.context_gate = None
@@ -104,7 +117,7 @@ class RNNDecoderBase(nn.Module):
         self._reuse_copy_attn = reuse_copy_attn
 
     def forward(self, tgt, memory_bank, state, memory_lengths=None,
-                step=None):
+                step=None, intervention=None, dump_layers=False):
         """
         Args:
             tgt (`LongTensor`): sequences of padded tokens
@@ -132,8 +145,14 @@ class RNNDecoderBase(nn.Module):
         # END
 
         # Run the forward pass of the RNN.
-        decoder_final, decoder_outputs, attns = self._run_forward_pass(
-            tgt, memory_bank, state, memory_lengths=memory_lengths)
+        if dump_layers:
+            decoder_final, decoder_outputs, attns, dumps = self._run_forward_pass(
+                tgt, memory_bank, state, memory_lengths=memory_lengths, intervention=intervention,
+                dump_layers=dump_layers)
+        else:
+            decoder_final, decoder_outputs, attns = self._run_forward_pass(
+                tgt, memory_bank, state, memory_lengths=memory_lengths, intervention=intervention,
+                dump_layers=dump_layers)
 
         # Update the state with the result.
         final_output = decoder_outputs[-1]
@@ -154,7 +173,11 @@ class RNNDecoderBase(nn.Module):
                 if type(attns[k]) == list:
                     attns[k] = torch.stack(attns[k])
 
-        return decoder_outputs, state, attns
+        if dump_layers:
+            return decoder_outputs, state, attns, dumps
+        else:
+            return decoder_outputs, state, attns
+
 
     def init_decoder_state(self, src, memory_bank, encoder_final):
         """ Init decoder state with last state of the encoder """
@@ -191,7 +214,7 @@ class StdRNNDecoder(RNNDecoderBase):
     or `copy_attn` support.
     """
 
-    def _run_forward_pass(self, tgt, memory_bank, state, memory_lengths=None):
+    def _run_forward_pass(self, tgt, memory_bank, state, memory_lengths=None, intervention=None, dump_layers=False):
         """
         Private helper for running the specific RNN forward pass.
         Must be overriden by all subclasses.
@@ -219,10 +242,51 @@ class StdRNNDecoder(RNNDecoderBase):
         emb = self.embeddings(tgt)
 
         # Run the forward pass of the RNN.
-        if isinstance(self.rnn, nn.GRU):
-            rnn_output, decoder_final = self.rnn(emb, state.hidden[0])
+        if self.separate_layers:
+            if isinstance(self.layers[0], nn.GRU):
+                hidden = state.hidden[0]
+            else:
+                hidden = [
+                    (x[0].unsqueeze(0), x[1].unsqueeze(0))
+                    for x in zip(*state.hidden)
+                ]
+
+            output = emb
+
+            if dump_layers:
+                dumped_layers = []
+
+            decoder_final = []
+
+            for i, layer in enumerate(self.layers):
+                output, final = layer(output, hidden[i])
+
+                # Manually apply dropout
+                output = self.dropout(output)
+
+                # Apply intervention function if provided
+                if intervention is not None:
+                    output = intervention(output, i)
+
+                if dump_layers:
+                    dumped_layers.append(output)
+
+                decoder_final.append(final)
+
+            # Format decoder hidden state so the next step can read it
+            # Essentially the same as in encoder; TODO possibly refactor?
+            decoder_final = tuple(
+                torch.cat([decoder_final[l][n]
+                    for l in range(len(self.layers))
+                ], 0)
+                for n in range(len(decoder_final[0]))
+            )
+
         else:
-            rnn_output, decoder_final = self.rnn(emb, state.hidden)
+            if isinstance(self.rnn, nn.GRU):
+                rnn_output, decoder_final = self.rnn(emb, state.hidden[0])
+            else:
+                rnn_output, decoder_final = self.rnn(emb, state.hidden)
 
         # Check
         tgt_len, tgt_batch, _ = tgt.size()
@@ -250,7 +314,10 @@ class StdRNNDecoder(RNNDecoderBase):
                 decoder_outputs.view(tgt_len, tgt_batch, self.hidden_size)
 
         decoder_outputs = self.dropout(decoder_outputs)
-        return decoder_final, decoder_outputs, attns
+        if dump_layers:
+            return decoder_final, decoder_outputs, attns, dumped_layers
+        else:
+            return decoder_final, decoder_outputs, attns
 
     def _build_rnn(self, rnn_type, **kwargs):
         rnn, _ = rnn_factory(rnn_type, **kwargs)
@@ -291,7 +358,7 @@ class InputFeedRNNDecoder(RNNDecoderBase):
           G --> H
     """
 
-    def _run_forward_pass(self, tgt, memory_bank, state, memory_lengths=None):
+    def _run_forward_pass(self, tgt, memory_bank, state, memory_lengths=None, intervention=None, dump_layers=False):
         """
         See StdRNNDecoder._run_forward_pass() for description
         of arguments and return values.
@@ -324,7 +391,50 @@ class InputFeedRNNDecoder(RNNDecoderBase):
             emb_t = emb_t.squeeze(0)
             decoder_input = torch.cat([emb_t, input_feed], 1)
 
-            rnn_output, hidden = self.rnn(decoder_input, hidden)
+            if self.separate_layers:
+                if isinstance(self.layers[0], nn.GRU):
+                    hidden = state.hidden[0]
+                else:
+                    hidden = [
+                        (x[0].unsqueeze(0), x[1].unsqueeze(0))
+                        for x in zip(*state.hidden)
+                    ]
+
+                rnn_output = decoder_input
+
+                if dump_layers:
+                    dumped_layers = []
+
+                new_hidden = []
+
+                for i, layer in enumerate(self.layers):
+                    rnn_output, final = layer(rnn_output, hidden[i])
+
+                    # Manually apply dropout
+                    rnn_output = self.dropout(rnn_output)
+
+                    # Apply intervention function if provided
+                    if intervention is not None:
+                        rnn_output = intervention(rnn_output, i)
+
+                    if dump_layers:
+                        dumped_layers.append(rnn_output)
+
+                    new_hidden.append(final)
+
+                # Format decoder hidden state so the next step can read it
+                # Essentially the same as in encoder; TODO possibly refactor?
+                new_hidden = tuple(
+                    torch.cat([new_hidden[l][n]
+                        for l in range(len(self.layers))
+                    ], 0)
+                    for n in range(len(new_hidden[0]))
+                )
+
+                hidden = new_hidden
+            else:
+                rnn_output, hidden = self.rnn(decoder_input, hidden)
+
             decoder_output, p_attn = self.attn(
                 rnn_output,
                 memory_bank.transpose(0, 1),
@@ -355,7 +465,10 @@ class InputFeedRNNDecoder(RNNDecoderBase):
             elif self._copy:
                 attns["copy"] = attns["std"]
         # Return result.
-        return hidden, decoder_outputs, attns
+        if dump_layers:
+            return hidden, decoder_outputs, attns, dumped_layers
+        else:
+            return hidden, decoder_outputs, attns
 
     def _build_rnn(self, rnn_type, input_size,
                    hidden_size, num_layers, dropout):

@@ -46,6 +46,7 @@ class Beam(object):
 
         # The attentions (matrix) for each time.
         self.attn = []
+        self.dump = []
 
         # Time and k pair for finished.
         self.finished = []
@@ -71,7 +72,7 @@ class Beam(object):
         "Get the backpointers for the current timestep."
         return self.prev_ks[-1]
 
-    def advance(self, word_probs, attn_out):
+    def advance(self, word_probs, attn_out, layer_dump):
         """
         Given prob over words for every last beam `wordLk` and attention
         `attn_out`: Compute and update the beam search.
@@ -80,9 +81,11 @@ class Beam(object):
 
         * `word_probs`- probs of advancing from the last step (K x words)
         * `attn_out`- attention at the last step
+        * `layer_dump` - layer dump from the last decoder step
 
         Returns: True if beam search is complete.
         """
+
         num_words = word_probs.size(1)
         if self.stepwise_penalty:
             self.global_scorer.update_score(self, attn_out)
@@ -135,6 +138,7 @@ class Beam(object):
         self.prev_ks.append(prev_k)
         self.next_ys.append((best_scores_id - prev_k * num_words))
         self.attn.append(attn_out.index_select(0, prev_k))
+        self.dump.append(list(zip(*layer_dump)))
         self.global_scorer.update_global_state(self)
 
         for i in range(self.next_ys[-1].size(0)):
@@ -170,12 +174,13 @@ class Beam(object):
         """
         Walk back to construct the full hypothesis.
         """
-        hyp, attn = [], []
+        hyp, attn, dump = [], [], []
         for j in range(len(self.prev_ks[:timestep]) - 1, -1, -1):
             hyp.append(self.next_ys[j + 1][k])
             attn.append(self.attn[j][k])
+            dump.append(self.dump[j][k])
             k = self.prev_ks[j][k]
-        return hyp[::-1], torch.stack(attn[::-1])
+        return hyp[::-1], torch.stack(attn[::-1]), dump
 
 
 class GNMTGlobalScorer(object):
