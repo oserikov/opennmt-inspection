@@ -251,7 +251,7 @@ class StdRNNDecoder(RNNDecoderBase):
                     for x in zip(*state.hidden)
                 ]
 
-            output = emb
+            rnn_output = emb
 
             if dump_layers:
                 dumped_layers = []
@@ -259,10 +259,10 @@ class StdRNNDecoder(RNNDecoderBase):
             decoder_final = []
 
             for i, layer in enumerate(self.layers):
-                output, final = layer(output, hidden[i])
+                rnn_output, final = layer(output, hidden[i])
 
                 # Manually apply dropout
-                output = self.dropout(output)
+                rnn_output = self.dropout(output)
 
                 # Apply intervention function if provided
                 if intervention is not None:

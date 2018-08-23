@@ -16,6 +16,7 @@ import onmt.opts
 
 
 def main(opt):
+    # TODO new dump_layers passing protocol
     translator = build_translator(opt, report_score=True, logger=logger)
 
     translator.translate(src_path=opt.src,

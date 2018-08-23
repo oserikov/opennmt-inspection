@@ -82,7 +82,7 @@ class Translator(object):
                  logger=None,
                  gpu=False,
                  dump_beam="",
-                 dump_layers="",
+                 dump_layers=False,
                  min_length=0,
                  stepwise_penalty=False,
                  block_ngram_repeat=0,
@@ -217,7 +217,7 @@ class Translator(object):
         all_dumped_decoder_layers = []
 
         for batch in data_iter:
-            if self.dump_layers != '':
+            if self.dump_layers:
                 batch_data, dumped_encoder_layers, dumped_decoder_layers = self.translate_batch(batch,
                         data, decoder_intervention=decoder_intervention,
                         encoder_intervention=encoder_intervention,
@@ -344,16 +344,8 @@ class Translator(object):
             json.dump(self.translator.beam_accum,
                       codecs.open(self.dump_beam, 'w', 'utf-8'))
 
-        all_dumped_layers = (
-            all_dumped_encoder_layers,
-            all_dumped_decoder_layers
-        )
-
-        if self.dump_layers and self.dump_layers != -1:
-            torch.save(all_dumped_layers, self.dump_layers)
-
-        elif self.dump_layers == -1:
-            return all_dumped_encoder_layers, all_scores, all_predictions
+        if self.dump_layers:
+            return all_dumped_encoder_layers, all_dumped_decoder_layers, all_scores, all_predictions
 
         return all_scores, all_predictions
 

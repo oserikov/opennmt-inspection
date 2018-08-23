@@ -34,7 +34,7 @@ class FakeOpt(object):
             ignore_when_blocking=[],
             replace_unk=True,
             model=None,
-            dump_layers=-1,
+            dump_layers=True,
             verbose=False,
             report_bleu=False,
             batch_size=30,
@@ -95,22 +95,24 @@ def translate(
 
     modified = []
     dumps = []
+    decoder_dumps = []
 
     # NB. Some of this is kind of hacky with passing streams and things
     # and also returning them; it may be good to go back later and try to dedupe
     # all the plumbing. Everything should presently work though.
     for i, source in enumerate(sentences):
         stream = io.StringIO()
-        layer_dump, scores, predictions = translator.translate(src_data_iter=[source],
+        layer_dump, decoder_layer_dump, scores, predictions = translator.translate(src_data_iter=[source],
                              src_dir='',
                              batch_size=1,
                              attn_debug=False,
-                             intervention=lambda l, j: intervene(l, i, j),
+                             encoder_intervention=lambda l, j: intervene(l, i, j),
                              out_file=stream)
         translation = stream.getvalue()
 
         sys.stdout.flush()
         modified.append(translation)
         dumps.append(layer_dump)
+        decoder_dumps.append(decoder_layer_dump)
 
-    return modified, dumps
+    return modified, dumps, decoder_dumps
