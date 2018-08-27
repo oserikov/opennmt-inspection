@@ -19,12 +19,14 @@ class StackedLSTM(nn.Module):
             self.layers.append(nn.LSTMCell(input_size, rnn_size))
             input_size = rnn_size
 
-    def forward(self, input_feed, hidden):
+    def forward(self, input_feed, hidden, intervention=None):
         h_0, c_0 = hidden
         h_1, c_1 = [], []
         for i, layer in enumerate(self.layers):
             h_1_i, c_1_i = layer(input_feed, (h_0[i], c_0[i]))
             input_feed = h_1_i
+            if intervention is not None:
+                input_feed = intervention(input_feed)
             if i + 1 != self.num_layers:
                 input_feed = self.dropout(input_feed)
             h_1 += [h_1_i]

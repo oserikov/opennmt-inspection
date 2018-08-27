@@ -14,16 +14,23 @@ import onmt.model_builder
 import onmt.modules
 import onmt.opts
 
+import torch
+
 
 def main(opt):
-    # TODO new dump_layers passing protocol
     translator = build_translator(opt, report_score=True, logger=logger)
 
-    translator.translate(src_path=opt.src,
+    # TODO I think modifying opt is bad practice
+    if opt.dump_layers != '':
+        dump_location = opt.dump_layers
+        opt.dump_layers = True
+
+    enc, dec, scores, predictions = translator.translate(src_path=opt.src,
                          tgt_path=opt.tgt,
                          src_dir=opt.src_dir,
                          batch_size=opt.batch_size,
                          attn_debug=opt.attn_debug)
+    torch.save((enc, dec), dump_location)
 
 
 if __name__ == "__main__":

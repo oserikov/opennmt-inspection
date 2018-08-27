@@ -1,6 +1,7 @@
 from __future__ import division
 import torch
 from onmt.translate import penalties
+from onmt.util import shape_of
 
 
 class Beam(object):
@@ -138,7 +139,8 @@ class Beam(object):
         self.prev_ks.append(prev_k)
         self.next_ys.append((best_scores_id - prev_k * num_words))
         self.attn.append(attn_out.index_select(0, prev_k))
-        self.dump.append(list(zip(*layer_dump)))
+        # transpose to put beam option first.
+        self.dump.append(layer_dump.transpose(0, 1).index_select(0, prev_k))
         self.global_scorer.update_global_state(self)
 
         for i in range(self.next_ys[-1].size(0)):
@@ -175,6 +177,7 @@ class Beam(object):
         Walk back to construct the full hypothesis.
         """
         hyp, attn, dump = [], [], []
+
         for j in range(len(self.prev_ks[:timestep]) - 1, -1, -1):
             hyp.append(self.next_ys[j + 1][k])
             attn.append(self.attn[j][k])

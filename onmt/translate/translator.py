@@ -17,6 +17,8 @@ import onmt.translate.beam
 import onmt.inputters as inputters
 import onmt.opts as opts
 
+from onmt.util import shape_of
+
 
 def build_translator(opt, report_score=True, logger=None, out_file=None, use_output=True):
     if out_file is None and use_output:
@@ -453,7 +455,10 @@ class Translator(object):
 
             # Run one step.
             if dump_layers:
-                dec_out, dec_states, attn, dumped_decoder_layers = self.model.decoder(
+                # dumped_decoder_layers has the capacity to contain information from multiple
+                # tokens, but we only advance one token per batch here so we can unpack immediately.
+                # (TODO I am only like 70% sure that this is true)
+                dec_out, dec_states, attn, (dumped_decoder_layers,) = self.model.decoder(
                     inp, memory_bank, dec_states, memory_lengths=memory_lengths,
                     dump_layers=True,
                     intervention=decoder_intervention,
@@ -490,10 +495,8 @@ class Translator(object):
             for j, b in enumerate(beam):
                 b.advance(out[:, j],
                           beam_attn.data[:, j, :memory_lengths[j]],
-                          [
-                             layer[j * beam_size : (j + 1) * beam_size]
-                             for layer in dumped_decoder_layers
-                          ])
+                         dumped_decoder_layers[:, j * beam_size : (j + 1) * beam_size, :]
+                    )
                 dec_states.beam_update(j, b.get_current_origin(), beam_size)
 
         # (4) Extract sentences from beam.
