@@ -530,6 +530,55 @@ def modify_opts(parser):
     group.add_argument('-modify_value', type=float, default=0,
                         help="Value to which to set the modified neuron")
 
+def forced_translation_opts(parser):
+    """ Training and saving options """
+
+    group = parser.add_argument_group('General')
+    group.add_argument('-data', required=True,
+                       help="""Path prefix to the ".train.pt" and
+                       ".valid.pt" file path from preprocess.py""")
+    # GPU
+    group.add_argument('-gpuid', default=[], nargs='+', type=int,
+                       help="Use CUDA on the listed devices.")
+
+    # Init options
+    group.add_argument('-model', default='', type=str,
+                       required=True, help="""Path to the saved model""")
+    group.add_argument('-dump_layers', default='', type=str,
+                        help="""Place to dump enocder and decoder
+                        activations""")
+
+    # Optimization options
+    group = parser.add_argument_group('Optimization- Type')
+    group.add_argument('-batch_size', type=int, default=32,
+                       help='Maximum batch size for validation')
+    group.add_argument('-label_smoothing', type=float, default=0.0,
+                       help="""Label smoothing value epsilon.
+                       Probabilities of all non-true labels
+                       will be smoothed by epsilon / (vocab_size - 1).
+                       Set to zero to turn off label smoothing.
+                       For more detailed information, see:
+                       https://arxiv.org/abs/1512.00567""")
+    # learning rate
+    group = parser.add_argument_group('Logging')
+    group.add_argument('-report_every', type=int, default=50,
+                       help="Print stats at this interval.")
+    group.add_argument('-log_file', type=str, default="",
+                       help="Output logs to a file under this path.")
+    group.add_argument('-exp_host', type=str, default="",
+                       help="Send logs to this crayon server.")
+    group.add_argument('-exp', type=str, default="",
+                       help="Name of the experiment for logging.")
+    # Use TensorboardX for visualization during training
+    group.add_argument('-tensorboard', action="store_true",
+                       help="""Use tensorboardX for visualization during training.
+                       Must have the library tensorboardX.""")
+    group.add_argument("-tensorboard_log_dir", type=str,
+                       default="runs/onmt",
+                       help="""Log directory for Tensorboard.
+                       This is also the name of the run.
+                       """)
+
 def add_md_help_argument(parser):
     """ md help parser """
     parser.add_argument('-md', action=MarkdownHelpAction,

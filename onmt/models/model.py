@@ -1,6 +1,8 @@
 """ Onmt NMT Model base class definition """
 import torch.nn as nn
 
+from onmt.util import shape_of
+
 
 class NMTModel(nn.Module):
     """
@@ -19,7 +21,7 @@ class NMTModel(nn.Module):
         self.encoder = encoder
         self.decoder = decoder
 
-    def forward(self, src, tgt, lengths, dec_state=None):
+    def forward(self, src, tgt, lengths, dec_state=None, dump_layers=False):
         """Forward propagate a `src` and `tgt` pair for training.
         Possible initialized with a beginning decoder state.
 
@@ -42,16 +44,35 @@ class NMTModel(nn.Module):
         """
         tgt = tgt[:-1]  # exclude last target from inputs
 
-        enc_final, memory_bank = self.encoder(src, lengths)
-        enc_state = \
-            self.decoder.init_decoder_state(src, memory_bank, enc_final)
-        decoder_outputs, dec_state, attns = \
-            self.decoder(tgt, memory_bank,
-                         enc_state if dec_state is None
-                         else dec_state,
-                         memory_lengths=lengths)
-        if self.multigpu:
-            # Not yet supported on multi-gpu
-            dec_state = None
-            attns = None
-        return decoder_outputs, attns, dec_state
+        if dump_layers:
+            enc_final, memory_bank, dumped_encoder = self.encoder(src, lengths, dump_layers=True)
+            enc_state = \
+                self.decoder.init_decoder_state(src, memory_bank, enc_final)
+            decoder_outputs, dec_state, attns, dumped_decoder = \
+                self.decoder(tgt, memory_bank,
+                             enc_state if dec_state is None
+                             else dec_state,
+                             memory_lengths=lengths,
+                             dump_layers=True)
+            if self.multigpu:
+                # Not yet supported on multi-gpu
+                dec_state = None
+                attns = None
+
+            # TODO properly transpose dumped encoder and decoder
+            return decoder_outputs, attns, dec_state, (dumped_encoder, dumped_decoder)
+
+        else:
+            enc_final, memory_bank = self.encoder(src, lengths)
+            enc_state = \
+                self.decoder.init_decoder_state(src, memory_bank, enc_final)
+            decoder_outputs, dec_state, attns = \
+                self.decoder(tgt, memory_bank,
+                             enc_state if dec_state is None
+                             else dec_state,
+                             memory_lengths=lengths)
+            if self.multigpu:
+                # Not yet supported on multi-gpu
+                dec_state = None
+                attns = None
+            return decoder_outputs, attns, dec_state

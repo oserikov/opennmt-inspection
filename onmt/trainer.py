@@ -207,7 +207,7 @@ class Trainer(object):
 
         return total_stats
 
-    def validate(self, valid_iter):
+    def validate(self, valid_iter, dump_layers=False):
         """ Validate model.
             valid_iter: validate data iterator
         Returns:
@@ -217,6 +217,9 @@ class Trainer(object):
         self.model.eval()
 
         stats = onmt.utils.Statistics()
+
+        all_dumped_enc = []
+        all_dumped_dec = []
 
         for batch in valid_iter:
             print(batch)
@@ -233,7 +236,15 @@ class Trainer(object):
             tgt = inputters.make_features(batch, 'tgt')
 
             # F-prop through the model.
-            outputs, attns, _ = self.model(src, tgt, src_lengths)
+            if dump_layers:
+                outputs, attns, _, (d_enc, d_dec) = self.model(src, tgt, src_lengths, dump_layers=True)
+
+                # TODO permute
+
+                all_dumped_enc.extend(d_enc)
+                all_dumped_dec.extend(d_dec)
+            else:
+                outputs, attns, _ = self.model(src, tgt, src_lengths, dump_layers=True)
 
             # Compute loss.
             batch_stats = self.valid_loss.monolithic_compute_loss(
@@ -245,7 +256,10 @@ class Trainer(object):
         # Set model back to training mode.
         self.model.train()
 
-        return stats
+        if dump_layers:
+            return stats, (all_dumped_enc, all_dumped_dec)
+        else:
+            return stats
 
     def epoch_step(self, ppl, epoch):
         """ Epoch step."""

@@ -140,7 +140,7 @@ def build_save_dataset(corpus_type, fields, opt, logger=None):
     if opt.data_type == 'text':
         return build_save_in_shards(
             src_corpus, tgt_corpus, fields,
-            corpus_type, opt)
+            corpus_type, opt, logger=logger)
 
     # For data_type == 'img' or 'audio', currently we don't do
     # preprocess sharding. We only build a monolithic dataset.

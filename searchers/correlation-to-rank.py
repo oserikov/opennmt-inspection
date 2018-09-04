@@ -10,7 +10,9 @@ layer = int(sys.argv[3])
 out = sys.argv[4]
 
 correlations = torch.load(corr_file)
+
 correlations = correlations[network][layer][0]
+
 maxs, _ = torch.max(
     torch.abs(correlations) *
     (1 - torch.eq(

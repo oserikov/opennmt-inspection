@@ -229,28 +229,8 @@ class Translator(object):
                 # the same order as input occurred.
                 inds, perm = torch.sort(batch_data['batch'].indices.data)
 
-                # At this point dumped_layers is going to be an array of
-                # (num_layers) packed sequences, each of which has (len) x (batch)
-                # shape. We would like to transpose this, so that
-                # we have an array of "sentences", each of which is
-                # an array of "tokens", each of which is an array of "layers",
-                # each of which is an array of "neurons".
-                dumped_encoder_layers = [unpack(layer) for layer in dumped_encoder_layers] # Tuples of (tensor, lengths)
                 dumped_encoder_layers = [
-                    [
-                        [
-                            # Array of layers
-                            dumped_encoder_layers[i][0][t][idx]
-                            for i in range(len(dumped_encoder_layers))
-                        ]
-
-                        # Array of tokens; dumped_encoder_layers[0][1] is the list of
-                        # sentence lengths for the batch, so we can look up
-                        # number of tokens here
-                        for t in range(dumped_encoder_layers[0][1][idx])
-                    ]
-                    # Array of sentences
-                    for idx in perm
+                    dumped_encoder_layers[idx] for idx in perm
                 ]
 
                 # Dumped decoder layers are already essentially in this format,
@@ -412,7 +392,7 @@ class Translator(object):
 
         # Collect intermediate layers if requested; push through a modification function if requested.
         if dump_layers:
-            enc_states, dumped_encoder_layers, memory_bank = self.model.encoder(src, src_lengths, dump_layers=True,
+            enc_states, memory_bank, dumped_encoder_layers = self.model.encoder(src, src_lengths, dump_layers=True,
                     intervention=encoder_intervention)
         else:
             enc_states, memory_bank = self.model.encoder(src, src_lengths,

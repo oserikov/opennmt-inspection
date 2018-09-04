@@ -1,18 +1,35 @@
 #!/usr/bin/env python
 
 import torch
+from torch import Tensor
+from torch.autograd import Variable
+
+def shape_of(x):
+    if type(x) in (list, tuple):
+        return 'list[%d] of e.g. %s' % (len(x), shape_of(x[0]))
+    elif isinstance(x, Tensor) or isinstance(x, Variable):
+        return 'tensor[%r]' % (x.shape,)
+    else:
+        return str(type(x))
 
 # Find most correlated neurons between a list of dumps
 def correlate_dumps(dump_list):
     # Concatenate together the first two dimensions to go from (sent, tok, layer, neuron)
     # to (tok, layer, neuron)
+    print('ORIGINAL DUMP LIST HAS SHAPE:')
+    print(shape_of(dump_list))
+
     dump_list = [
         torch.cat(tuple(
-        torch.stack(tuple(
-        torch.stack(tok) for tok in sent))
-        for sent in dump))
+            torch.stack(tuple(
+                torch.stack(tok)
+                for tok in sent))
+            for sent in dump))
         for dump in dump_list
     ]
+
+    print('DUMP LIST HAS SHAPE:')
+    print(shape_of(dump_list))
 
     # Whiten
     dump_list = [(dump - dump.mean(0)) / dump.std(0) for dump in dump_list]
@@ -105,10 +122,10 @@ import gc
 
 dumps = []
 for x in tqdm([
-        '/data/sls/scratch/abau/layer-dumps/en-es-1.dump.pt',
-        '/data/sls/scratch/abau/layer-dumps/en-es-2.dump.pt',
-        '/data/sls/scratch/abau/layer-dumps/en-es-3.dump.pt']):
-    dumps.append([[[l.cpu() for l in tok] for tok in sent] for sent in tqdm(torch.load(x))])
+        '/data/sls/scratch/abau/layer-dumps/en-es-1-forced-translation.pt',
+        '/data/sls/scratch/abau/layer-dumps/en-es-2-forced-translation.pt',
+        '/data/sls/scratch/abau/layer-dumps/en-es-3-forced-translation.pt']):
+    dumps.append([[tok for tok in sent] for sent in tqdm(torch.load(x)[1])])
     gc.collect()
 
 '''

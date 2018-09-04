@@ -131,8 +131,22 @@ class RNNEncoder(EncoderBase):
         if self.use_bridge:
             encoder_final = self._bridge(encoder_final)
 
+        dumped_layers = [unpack(layer) for layer in dumped_layers]
+        dumped_layers = [
+            [
+                [
+                    # Array of layers
+                    dumped_layers[i][0][t][idx]
+                    for i in range(len(dumped_layers))
+                ]
+
+                for t in range(dumped_layers[0][1][idx])
+            ]
+            for idx in range(len(dumped_layers[0][1]))
+        ]
+
         if dump_layers:
-            return encoder_final, dumped_layers, memory_bank
+            return encoder_final, memory_bank, dumped_layers
         else:
             return encoder_final, memory_bank
 
