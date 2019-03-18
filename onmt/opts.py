@@ -88,7 +88,7 @@ def model_opts(parser):
                        help="""Have an additional layer between the last encoder
                        state and the first decoder state""")
     group.add_argument('-rnn_type', type=str, default='LSTM',
-                       choices=['LSTM', 'GRU', 'SRU'],
+                       choices=['LSTM', 'GRU', 'SRU', 'RNN'],
                        action=CheckSRU,
                        help="""The gate type to use in the RNNs""")
     # group.add_argument('-residual',   action="store_true",
@@ -105,7 +105,7 @@ def model_opts(parser):
     # Attention options
     group = parser.add_argument_group('Model- Attention')
     group.add_argument('-global_attention', type=str, default='general',
-                       choices=['dot', 'general', 'mlp'],
+                       choices=['dot', 'general', 'mlp', 'none'],
                        help="""The attention type to use:
                        dotprod or general (Luong) or MLP (Bahdanau)""")
     group.add_argument('-self_attn_type', type=str, default="scaled-dot",
